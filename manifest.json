@@ -1,0 +1,19 @@
+{
+    "manifest_version": 3,
+    "name": "Close Tabs Tool",
+    "version": "3.5",
+    "description": "快速查看、跳转、固定和关闭标签页。支持一键关闭所有非固定标签页。",
+    "permissions": [
+        "tabs",
+        "notifications"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "action": {
+        "default_popup": "popup.html"
+    },
+    "icons": {
+        "128": "icon128.png"
+    }
+}

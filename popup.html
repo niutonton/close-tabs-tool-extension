@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Close Tabs Tool</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div id="new-year-greeting">
+        <span>新</span><span>年</span><span>快</span><span>乐</span>
+    </div>
+    <div id="header">
+        <span id="tab-count"></span>
+        <div id="festive-horse-icon"></div>
+        <div class="search-container">
+            <input type="text" id="search-box" placeholder="搜索标签页...">
+        </div>
+    </div>
+
+    <div id="tabs-container"></div>
+
+    <div id="footer">
+        <button id="add-window-btn">+</button>
+        <button id="close-all-btn">关闭所有非固定标签页</button>
+    </div>
+
+    <div id="custom-tooltip"></div>
+    <script src="popup.js"></script>
+</body>
+</html>
