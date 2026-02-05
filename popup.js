@@ -403,3 +403,4 @@ chrome.tabs.onRemoved.addListener(scheduleInit);
 
 scheduleInit(); // Initial load
 });
+// This is a test comment for the IDE auto-push experiment.
