@@ -65,7 +65,7 @@ async function renderTabs(groupedTabs, totalTabCount) {
     });
 
     tabsContainer.innerHTML = '';
-    document.getElementById('tab-count').textContent = `共 ${totalTabCount} 个标签页`;
+    document.getElementById('tab-count').textContent = `总共 ${totalTabCount} 个标签页`;
 
     const urlCounts = Object.values(groupedTabs).flat().reduce((acc, tab) => {
         if (tab.url) {
