@@ -52,7 +52,7 @@ function scheduleInit() {
 }
 
 // Renders tabs grouped by window
-async function renderTabs(groupedTabs, totalTabCount) {
+async function renderTabs(groupedTabs, totalTabCount, names, urlCounts) {
     const tabsContainer = document.getElementById('tabs-container');
 
     // Save scroll positions
@@ -67,13 +67,6 @@ async function renderTabs(groupedTabs, totalTabCount) {
     tabsContainer.innerHTML = '';
     document.getElementById('tab-count').textContent = `总共 ${totalTabCount} 个标签页`;
 
-    const urlCounts = Object.values(groupedTabs).flat().reduce((acc, tab) => {
-        if (tab.url) {
-            acc[tab.url] = (acc[tab.url] || 0) + 1;
-        }
-        return acc;
-    }, {});
-
     // Use the stored popup window ID for sorting
     const windowIds = Object.keys(groupedTabs).sort((a, b) => {
         if (parseInt(a) === currentPopupWinId) return -1; // Popup's window first
@@ -83,6 +76,7 @@ async function renderTabs(groupedTabs, totalTabCount) {
 
     for (const windowId of windowIds) {
         const tabs = groupedTabs[windowId];
+        tabs.sort((a, b) => a.index - b.index);
 
         const windowContainer = document.createElement('div');
         windowContainer.className = 'window-container';
@@ -90,10 +84,54 @@ async function renderTabs(groupedTabs, totalTabCount) {
 
         const windowHeader = document.createElement('div');
         windowHeader.className = 'window-header';
-        const isCurrent = parseInt(windowId) === currentPopupWinId;
-        
-        const windowTitle = document.createElement('span');
-        windowTitle.textContent = `窗口 ${windowIds.indexOf(windowId) + 1}` + (isCurrent ? ' (当前窗口)' : '');
+        if (parseInt(windowId) === currentPopupWinId) {
+            windowHeader.classList.add('current-window');
+        }
+
+        const windowTitle = document.createElement('div');
+        windowTitle.className = 'window-title';
+        windowTitle.textContent = names[windowId] || `窗口 ${windowId}`;
+        windowTitle.setAttribute('title', '点击可重命名');
+
+        windowTitle.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'window-title-input';
+            input.value = windowTitle.textContent;
+
+            windowTitle.replaceWith(input);
+            input.focus();
+            input.select();
+
+            const saveName = async () => {
+                const newName = input.value.trim();
+                const { windowNames } = await chrome.storage.local.get('windowNames');
+                const currentNames = windowNames || {};
+
+                if (newName && newName !== `窗口 ${windowId}`) {
+                    currentNames[windowId] = newName;
+                } else {
+                    delete currentNames[windowId];
+                }
+
+                await chrome.storage.local.set({ windowNames: currentNames });
+                windowTitle.textContent = newName || `窗口 ${windowId}`;
+                input.replaceWith(windowTitle);
+            };
+
+            input.addEventListener('blur', saveName);
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') saveName();
+                if (e.key === 'Escape') input.replaceWith(windowTitle);
+            });
+        });
+
+        windowHeader.appendChild(windowTitle);
+
+        const tabCountInWindow = document.createElement('span');
+        tabCountInWindow.className = 'tab-count-in-window';
+        tabCountInWindow.textContent = `${tabs.length} 个标签页`;
+        windowHeader.appendChild(tabCountInWindow);
 
         const closeWindowBtn = document.createElement('button');
         closeWindowBtn.className = 'close-window-btn';
@@ -108,156 +146,22 @@ async function renderTabs(groupedTabs, totalTabCount) {
                 console.error(`Failed to close window ${windowId}:`, error.message);
             }
         };
-
-        windowHeader.appendChild(windowTitle);
         windowHeader.appendChild(closeWindowBtn);
 
-        if (isCurrent) {
-            windowHeader.classList.add('current-window');
-        }
         windowContainer.appendChild(windowHeader);
 
         const tabList = document.createElement('div');
         tabList.className = 'tab-list';
 
-        // Add drop zone listeners
-        tabList.addEventListener('dragover', (e) => {
-            e.preventDefault(); // Allow drop
-            tabList.classList.add('drag-over');
-        });
-
-        tabList.addEventListener('dragleave', () => {
-            tabList.classList.remove('drag-over');
-        });
-
-        tabList.addEventListener('drop', async (e) => {
-            e.preventDefault();
-            tabList.classList.remove('drag-over');
-            const tabId = parseInt(e.dataTransfer.getData('text/plain'), 10);
-            const targetWindowId = parseInt(windowId, 10);
-
-            try {
-                // Check if the target window has only a new tab page
-                const targetTabs = await chrome.tabs.query({ windowId: targetWindowId });
-                let tabToClose = null;
-                if (targetTabs.length === 1 && (targetTabs[0].url.startsWith('chrome://newtab') || targetTabs[0].url.startsWith('edge://newtab'))) {
-                    tabToClose = targetTabs[0].id;
-                }
-
-                // Move the tab
-                await chrome.tabs.move(tabId, { windowId: targetWindowId, index: -1 });
-
-                // If we found a 'new tab' to replace, close it
-                if (tabToClose) {
-                    await chrome.tabs.remove(tabToClose);
-                }
-
-                // Make the moved tab active
-                await chrome.tabs.update(tabId, { active: true });
-                scheduleInit(); // Refresh the entire UI
-            } catch (error) {
-                console.error(`Could not move tab ${tabId} to window ${targetWindowId}:`, error);
-            }
-        });
-
         for (const tab of tabs) {
-            const tabItem = document.createElement('div');
-            tabItem.className = 'tab-item';
-            tabItem.draggable = true; // Make tab items draggable
-
-            // Drag and Drop event listeners
-            tabItem.addEventListener('dragstart', (e) => {
-                e.dataTransfer.setData('text/plain', tab.id);
-                e.dataTransfer.effectAllowed = 'move';
-                setTimeout(() => tabItem.classList.add('dragging'), 0);
-            });
-
-            tabItem.addEventListener('dragend', () => {
-                tabItem.classList.remove('dragging');
-            });
-
-            if (tab.pinned) {
-                tabItem.classList.add('pinned');
-            }
-
-            tabItem.onclick = () => {
-                chrome.tabs.update(tab.id, { active: true });
-                chrome.windows.update(tab.windowId, { focused: true });
-            };
-
-            const favicon = document.createElement('img');
-            favicon.src = tab.favIconUrl || 'icon128.png';
-            favicon.className = 'favicon';
-            favicon.onerror = () => { favicon.src = 'icon128.png'; };
-
-            const title = document.createElement('span');
-            title.textContent = tab.title;
-            title.className = 'title';
-
-            const pinBtn = document.createElement('button');
-            pinBtn.className = 'pin-btn';
-            pinBtn.addEventListener('mouseover', (e) => showTooltip(tab.pinned ? '取消固定' : '固定标签页', e));
-            pinBtn.addEventListener('mouseout', hideTooltip);
-            pinBtn.onclick = async (e) => {
-                e.stopPropagation();
-                await chrome.tabs.update(tab.id, { pinned: !tab.pinned });
-                scheduleInit();
-            };
-
-            const closeBtn = document.createElement('button');
-            closeBtn.className = 'close-btn';
-            closeBtn.innerHTML = '&times;';
-            closeBtn.addEventListener('mouseover', (e) => showTooltip('关闭标签页', e));
-            closeBtn.addEventListener('mouseout', hideTooltip);
-            closeBtn.onclick = async (e) => {
-                e.stopPropagation();
-                try {
-                    await chrome.tabs.remove(tab.id);
-                    // No need to call scheduleInit() here, as the onRemoved listener will handle it.
-                } catch (error) {
-                    console.log(`Failed to close tab ${tab.id}:`, error.message);
-                    scheduleInit();
-                }
-            };
-
-            tabItem.appendChild(favicon);
-            tabItem.appendChild(title);
-
-            if (tab.url && urlCounts[tab.url] > 1) {
-                const duplicateBadge = document.createElement('span');
-                duplicateBadge.className = 'duplicate-badge';
-                duplicateBadge.textContent = urlCounts[tab.url];
-                
-                // New: Add tooltip and click event for closing duplicates
-                duplicateBadge.addEventListener('mouseover', (e) => showTooltip(`存在 ${urlCounts[tab.url]} 个相同标签页，点击关闭其余`, e));
-                duplicateBadge.addEventListener('mouseout', hideTooltip);
-                duplicateBadge.onclick = async (e) => {
-                    e.stopPropagation(); // Prevent the click from bubbling up to the tab item
-                    
-                    // Find all tabs with the same URL
-                    const tabsToClose = await chrome.tabs.query({ url: tab.url });
-                    
-                    if (tabsToClose.length > 1) {
-                        // Keep the first tab, close the rest
-                        const tabIdsToClose = tabsToClose.slice(1).map(t => t.id);
-                        await chrome.tabs.remove(tabIdsToClose);
-                        // The onRemoved listener will automatically trigger a UI refresh
-                    }
-                };
-
-                tabItem.appendChild(duplicateBadge);
-            }
-
-            tabItem.appendChild(pinBtn);
-            tabItem.appendChild(closeBtn);
-            tabList.appendChild(tabItem);
+            const tabElement = createTabElement(tab, windowId, urlCounts);
+            tabList.appendChild(tabElement);
         }
         windowContainer.appendChild(tabList);
         tabsContainer.appendChild(windowContainer);
 
         // Restore scroll position
         if (scrollPositions[windowId]) {
-            // Use setTimeout to ensure the DOM is ready
             setTimeout(() => {
                 tabList.scrollTop = scrollPositions[windowId];
             }, 0);
@@ -265,20 +169,165 @@ async function renderTabs(groupedTabs, totalTabCount) {
     }
 }
 
-// Fetches, sorts, and caches all tabs, then triggers the initial render
+function createTabElement(tab, windowId, urlCounts) {
+    const tabItem = document.createElement('div');
+    tabItem.className = 'tab-item';
+    tabItem.dataset.tabId = tab.id;
+    tabItem.draggable = true;
+
+    // --- Drag and Drop Logic ---
+    tabItem.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', tab.id);
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => tabItem.classList.add('dragging'), 0);
+    });
+
+    tabItem.addEventListener('dragend', () => {
+        tabItem.classList.remove('dragging');
+        document.querySelectorAll('.drag-over-top, .drag-over-bottom, .drag-over-forbidden').forEach(el => {
+            el.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-forbidden');
+        });
+    });
+
+    tabItem.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        const sourceTabId = parseInt(e.dataTransfer.getData('text/plain'), 10);
+        const sourceTab = allTabs.find(t => t.id === sourceTabId);
+
+        if (sourceTab && sourceTab.pinned !== tab.pinned) {
+            tabItem.classList.add('drag-over-forbidden');
+            return;
+        }
+
+        const rect = tabItem.getBoundingClientRect();
+        const isNearTop = e.clientY < rect.top + rect.height / 2;
+        if (isNearTop) {
+            tabItem.classList.add('drag-over-top');
+            tabItem.classList.remove('drag-over-bottom');
+        } else {
+            tabItem.classList.add('drag-over-bottom');
+            tabItem.classList.remove('drag-over-top');
+        }
+    });
+
+    tabItem.addEventListener('dragleave', (e) => {
+        tabItem.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-forbidden');
+    });
+
+    tabItem.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        tabItem.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-forbidden');
+
+        const sourceTabId = parseInt(e.dataTransfer.getData('text/plain'), 10);
+        const sourceTab = allTabs.find(t => t.id === sourceTabId);
+
+        if (!sourceTab || sourceTab.pinned !== tab.pinned) {
+            return;
+        }
+
+        if (sourceTabId === tab.id) return;
+
+        const rect = tabItem.getBoundingClientRect();
+        const isNearTop = e.clientY < rect.top + rect.height / 2;
+        let newIndex = tab.index;
+
+        if (sourceTab.windowId === tab.windowId && sourceTab.index < tab.index) {
+            newIndex--;
+        }
+        
+        if (!isNearTop) {
+            newIndex++;
+        }
+
+        try {
+            await chrome.tabs.move(sourceTabId, { windowId: parseInt(windowId, 10), index: newIndex });
+            scheduleInit();
+        } catch (error) {
+            console.error("Error moving tab:", error);
+        }
+    });
+
+    if (tab.pinned) {
+        tabItem.classList.add('pinned');
+    }
+
+    tabItem.onclick = () => {
+        chrome.tabs.update(tab.id, { active: true });
+        chrome.windows.update(tab.windowId, { focused: true });
+    };
+
+    const favicon = document.createElement('img');
+    favicon.src = tab.favIconUrl || 'icon128.png';
+    favicon.className = 'favicon';
+    favicon.onerror = () => { favicon.src = 'icon128.png'; };
+
+    const title = document.createElement('span');
+    title.textContent = tab.title;
+    title.className = 'title';
+
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'pin-btn';
+    pinBtn.addEventListener('mouseover', (e) => showTooltip(tab.pinned ? '取消固定' : '固定标签页', e));
+    pinBtn.addEventListener('mouseout', hideTooltip);
+    pinBtn.onclick = async (e) => {
+        e.stopPropagation();
+        await chrome.tabs.update(tab.id, { pinned: !tab.pinned });
+        scheduleInit();
+    };
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'close-btn';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.addEventListener('mouseover', (e) => showTooltip('关闭标签页', e));
+    closeBtn.addEventListener('mouseout', hideTooltip);
+    closeBtn.onclick = async (e) => {
+        e.stopPropagation();
+        try {
+            await chrome.tabs.remove(tab.id);
+        } catch (error) {
+            console.log(`Failed to close tab ${tab.id}:`, error.message);
+            scheduleInit();
+        }
+    };
+
+    tabItem.appendChild(favicon);
+    tabItem.appendChild(title);
+
+    if (tab.url && urlCounts[tab.url] > 1) {
+        const duplicateBadge = document.createElement('span');
+        duplicateBadge.className = 'duplicate-badge';
+        duplicateBadge.textContent = urlCounts[tab.url];
+        duplicateBadge.addEventListener('mouseover', (e) => showTooltip(`存在 ${urlCounts[tab.url]} 个相同标签页，点击关闭其余`, e));
+        duplicateBadge.addEventListener('mouseout', hideTooltip);
+        duplicateBadge.onclick = async (e) => {
+            e.stopPropagation();
+            const tabsToClose = await chrome.tabs.query({ url: tab.url });
+            if (tabsToClose.length > 1) {
+                const tabIdsToClose = tabsToClose.slice(1).map(t => t.id);
+                await chrome.tabs.remove(tabIdsToClose);
+            }
+        };
+        tabItem.appendChild(duplicateBadge);
+    }
+
+    tabItem.appendChild(pinBtn);
+    tabItem.appendChild(closeBtn);
+
+    return tabItem;
+}
+
 async function init() {
     if (isInitializing) return;
     isInitializing = true;
+    console.log('[Init] Start');
     try {
-        const allTabsFromAPI = await chrome.tabs.query({}); // Get tabs from all windows
+        const allTabsFromAPI = await chrome.tabs.query({});
+        const { windowNames } = await chrome.storage.local.get('windowNames');
+        const names = windowNames || {};
+        console.log('  > Names loaded from storage:', names);
 
-        allTabsFromAPI.sort((a, b) => {
-            if (a.pinned && !b.pinned) return -1;
-            if (!a.pinned && b.pinned) return 1;
-            return a.id - b.id; // Fallback sort by tab ID
-        });
-
-        allTabs = allTabsFromAPI; // Cache for search
+        allTabs = allTabsFromAPI;
 
         const searchBox = document.getElementById('search-box');
         const searchTerm = searchBox.value.toLowerCase();
@@ -286,13 +335,12 @@ async function init() {
 
         if (searchTerm) {
             tabsToRender = allTabs.filter(tab => {
-                const title = tab.title.toLowerCase();
+                const title = (tab.title || '').toLowerCase();
                 const url = (tab.url || '').toLowerCase();
                 return title.includes(searchTerm) || url.includes(searchTerm);
             });
         }
 
-        // Group tabs by window ID
         const groupedTabs = tabsToRender.reduce((acc, tab) => {
             const windowId = tab.windowId;
             if (!acc[windowId]) {
@@ -302,105 +350,61 @@ async function init() {
             return acc;
         }, {});
 
-        await renderTabs(groupedTabs, allTabs.length);
+        const urlCounts = tabsToRender.reduce((acc, tab) => {
+            if (tab.url) {
+                acc[tab.url] = (acc[tab.url] || 0) + 1;
+            }
+            return acc;
+        }, {});
+
+        await renderTabs(groupedTabs, tabsToRender.length, names, urlCounts);
+    } catch (error) {
+        console.error("Error during init:", error);
     } finally {
         isInitializing = false;
     }
 }
 
-let isInitialized = false; // Flag to prevent multiple initializations
-
-// Initial setup when the popup is opened
 document.addEventListener('DOMContentLoaded', async () => {
-    // Festive animation for Chinese New Year
-    function createFestiveElement() {
-        const elements = ['🐎', '🏮', '🧧', '✨'];
-        const element = document.createElement('div');
-        element.classList.add('festive-element');
-        element.textContent = elements[Math.floor(Math.random() * elements.length)];
-        
-        // Random size
-        element.style.fontSize = Math.random() * 20 + 15 + 'px';
-
-        // Make elements fall from the sides, avoiding the center
-        let leftPosition = Math.random() * 35; // 0% to 35%
-        if (Math.random() > 0.5) {
-            leftPosition += 65; // Shift to the right side (65% to 100%)
-        }
-        element.style.left = leftPosition + 'vw';
-
-        const duration = Math.random() * 6 + 6; // Duration between 6 and 12 seconds
-        element.style.animationDuration = duration + 's';
-        
-        document.body.appendChild(element);
-        
-        // Remove the element after it falls
-        setTimeout(() => {
-            element.remove();
-        }, duration * 1000);
-    }
-
-    // Create a burst of festive elements
-    for (let i = 0; i < 30; i++) { // Increased the count for more festivity
-        setTimeout(createFestiveElement, Math.random() * 3000);
-    }
-
-    // Store the window ID when the popup is opened
     const currentWindow = await chrome.windows.getCurrent();
     currentPopupWinId = currentWindow.id;
 
-    if (isInitialized) {
-        return; // If already initialized, do nothing
-    }
-    isInitialized = true; // Set the flag
+    const searchBox = document.getElementById('search-box');
+    const closeAllBtn = document.getElementById('close-all-btn');
+    const addWindowBtn = document.getElementById('add-window-btn');
 
-    // "Close all non-pinned" button logic
-document.getElementById('close-all-btn').onclick = async () => {
-    // Close non-pinned tabs across all windows
-    const tabsToClose = await chrome.tabs.query({ pinned: false });
-    const tabIds = tabsToClose.map(tab => tab.id);
-    if (tabIds.length > 0) {
-        await chrome.tabs.remove(tabIds);
-    }
-    scheduleInit();
-};
-
-const searchBox = document.getElementById('search-box');
-
-searchBox.addEventListener('input', () => {
-    const searchTerm = searchBox.value.toLowerCase();
-    const filteredTabs = allTabs.filter(tab => {
-        const title = tab.title.toLowerCase();
-        const url = (tab.url || '').toLowerCase();
-        return title.includes(searchTerm) || url.includes(searchTerm);
+    searchBox.addEventListener('input', () => {
+        scheduleInit();
     });
 
-    // Group tabs by window ID for rendering
-    const groupedTabs = filteredTabs.reduce((acc, tab) => {
-        const windowId = tab.windowId;
-        if (!acc[windowId]) {
-            acc[windowId] = [];
+    closeAllBtn.addEventListener('click', async () => {
+        const tabsToClose = await chrome.tabs.query({ pinned: false });
+        const tabIds = tabsToClose.map(tab => tab.id);
+        if (tabIds.length > 0) {
+            await chrome.tabs.remove(tabIds);
         }
-        acc[windowId].push(tab);
-        return acc;
-    }, {});
+    });
+    closeAllBtn.addEventListener('mouseover', (e) => showTooltip('关闭所有未固定的标签页', e));
+    closeAllBtn.addEventListener('mouseout', hideTooltip);
 
-    renderTabs(groupedTabs, allTabs.length);
-});
+    addWindowBtn.addEventListener('click', () => {
+        chrome.windows.create({ focused: true, type: 'normal' });
+    });
+    addWindowBtn.addEventListener('mouseover', (e) => showTooltip('新建窗口', e));
+    addWindowBtn.addEventListener('mouseout', hideTooltip);
 
-const addWindowBtn = document.getElementById('add-window-btn');
-addWindowBtn.addEventListener('click', () => {
-    console.log('Popup: Sending createNewWindow message at ' + new Date().toLocaleTimeString());
-    chrome.runtime.sendMessage({ action: 'createNewWindow' });
+    scheduleInit();
 });
-addWindowBtn.addEventListener('mouseover', (e) => showTooltip('新建窗口', e));
-addWindowBtn.addEventListener('mouseout', hideTooltip);
 
 // Listen for window and tab changes to keep the UI in sync
 chrome.windows.onCreated.addListener(scheduleInit);
 chrome.tabs.onCreated.addListener(scheduleInit);
 chrome.tabs.onRemoved.addListener(scheduleInit);
-
-scheduleInit(); // Initial load
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'complete' || changeInfo.pinned !== undefined || changeInfo.title) {
+        scheduleInit();
+    }
 });
-// This is a test comment for the IDE auto-push experiment.
+chrome.tabs.onMoved.addListener(scheduleInit);
+chrome.tabs.onAttached.addListener(scheduleInit);
+chrome.tabs.onDetached.addListener(scheduleInit);
