@@ -177,8 +177,43 @@ function createTabElement(tab, windowId, urlCounts) {
 
     // --- Drag and Drop Logic ---
     tabItem.addEventListener('dragstart', (e) => {
-        e.dataTransfer.setData('text/plain', tab.id);
+        const selectedItems = document.querySelectorAll('.tab-item.selected');
+        let dragIds;
+        let isBatchDrag = false;
+
+        if (selectedItems.length > 0 && tabItem.classList.contains('selected')) {
+            isBatchDrag = true;
+            dragIds = Array.from(selectedItems).map(item => item.dataset.tabId);
+        } else {
+            document.querySelectorAll('.tab-item.selected').forEach(item => {
+                item.classList.remove('selected');
+            });
+            dragIds = [tab.id];
+        }
+        
+        e.dataTransfer.setData('text/plain', dragIds.join(','));
         e.dataTransfer.effectAllowed = 'move';
+
+        if (isBatchDrag) {
+            const dragPreview = document.createElement('div');
+            dragPreview.className = 'drag-preview';
+            dragPreview.textContent = `移动 ${dragIds.length} 个标签页`;
+            
+            const counter = document.createElement('span');
+            counter.className = 'drag-preview-counter';
+            counter.textContent = `+${dragIds.length}`;
+            dragPreview.textContent = tab.title; // Show the title of the item being dragged
+            dragPreview.appendChild(counter);
+
+            document.body.appendChild(dragPreview);
+            e.dataTransfer.setDragImage(dragPreview, -10, -10); // Offset the image slightly
+
+            // Clean up the preview element after the drag operation
+            setTimeout(() => {
+                document.body.removeChild(dragPreview);
+            }, 0);
+        }
+
         setTimeout(() => tabItem.classList.add('dragging'), 0);
     });
 
@@ -191,8 +226,8 @@ function createTabElement(tab, windowId, urlCounts) {
 
     tabItem.addEventListener('dragover', (e) => {
         e.preventDefault();
-        const sourceTabId = parseInt(e.dataTransfer.getData('text/plain'), 10);
-        const sourceTab = allTabs.find(t => t.id === sourceTabId);
+        const sourceIds = e.dataTransfer.getData('text/plain').split(',').map(id => parseInt(id, 10));
+        const sourceTab = allTabs.find(t => t.id === sourceIds[0]);
 
         if (sourceTab && sourceTab.pinned !== tab.pinned) {
             tabItem.classList.add('drag-over-forbidden');
@@ -219,21 +254,21 @@ function createTabElement(tab, windowId, urlCounts) {
         e.stopPropagation();
         tabItem.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-forbidden');
 
-        const sourceTabId = parseInt(e.dataTransfer.getData('text/plain'), 10);
-        const sourceTab = allTabs.find(t => t.id === sourceTabId);
+        const sourceTabIds = e.dataTransfer.getData('text/plain').split(',').map(id => parseInt(id, 10));
+        const sourceTab = allTabs.find(t => t.id === sourceTabIds[0]);
 
         if (!sourceTab || sourceTab.pinned !== tab.pinned) {
             return;
         }
 
-        if (sourceTabId === tab.id) return;
+        if (sourceTabIds.includes(tab.id)) return; // Avoid dropping a group onto itself
 
         const rect = tabItem.getBoundingClientRect();
         const isNearTop = e.clientY < rect.top + rect.height / 2;
         let newIndex = tab.index;
 
         if (sourceTab.windowId === tab.windowId && sourceTab.index < tab.index) {
-            newIndex--;
+            newIndex -= sourceTabIds.length;
         }
         
         if (!isNearTop) {
@@ -241,10 +276,10 @@ function createTabElement(tab, windowId, urlCounts) {
         }
 
         try {
-            await chrome.tabs.move(sourceTabId, { windowId: parseInt(windowId, 10), index: newIndex });
+            await chrome.tabs.move(sourceTabIds, { windowId: parseInt(windowId, 10), index: newIndex });
             scheduleInit();
         } catch (error) {
-            console.error("Error moving tab:", error);
+            console.error("Error moving tabs:", error);
         }
     });
 
@@ -268,6 +303,7 @@ function createTabElement(tab, windowId, urlCounts) {
 
     const pinBtn = document.createElement('button');
     pinBtn.className = 'pin-btn';
+    pinBtn.innerHTML = '📌'; // Use a pin emoji as the icon
     pinBtn.addEventListener('mouseover', (e) => showTooltip(tab.pinned ? '取消固定' : '固定标签页', e));
     pinBtn.addEventListener('mouseout', hideTooltip);
     pinBtn.onclick = async (e) => {
@@ -320,12 +356,10 @@ function createTabElement(tab, windowId, urlCounts) {
 async function init() {
     if (isInitializing) return;
     isInitializing = true;
-    console.log('[Init] Start');
     try {
         const allTabsFromAPI = await chrome.tabs.query({});
         const { windowNames } = await chrome.storage.local.get('windowNames');
         const names = windowNames || {};
-        console.log('  > Names loaded from storage:', names);
 
         allTabs = allTabsFromAPI;
 
@@ -392,6 +426,91 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     addWindowBtn.addEventListener('mouseover', (e) => showTooltip('新建窗口', e));
     addWindowBtn.addEventListener('mouseout', hideTooltip);
+
+    // --- Marquee Selection Logic ---
+    const tabsContainer = document.getElementById('tabs-container');
+    const selectionBox = document.getElementById('selection-box');
+    let isSelecting = false;
+    let startX = 0;
+    let startY = 0;
+
+    tabsContainer.addEventListener('mousedown', (e) => {
+        if (e.target === tabsContainer || e.target.classList.contains('window-container') || e.target.classList.contains('tab-list')) {
+            // Clear any previous selection when starting a new one from a blank area
+            document.querySelectorAll('.tab-item.selected').forEach(item => {
+                item.classList.remove('selected');
+            });
+            const closeSelectedBtn = document.getElementById('close-selected-btn');
+            if (closeSelectedBtn) {
+                closeSelectedBtn.style.display = 'none';
+            }
+
+            isSelecting = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            selectionBox.style.left = `${startX}px`;
+            selectionBox.style.top = `${startY}px`;
+            selectionBox.style.width = '0px';
+            selectionBox.style.height = '0px';
+            selectionBox.style.display = 'block';
+            e.preventDefault();
+        }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isSelecting) return;
+        const currentX = e.clientX;
+        const currentY = e.clientY;
+        const width = Math.abs(currentX - startX);
+        const height = Math.abs(currentY - startY);
+        const left = Math.min(currentX, startX);
+        const top = Math.min(currentY, startY);
+
+        selectionBox.style.width = `${width}px`;
+        selectionBox.style.height = `${height}px`;
+        selectionBox.style.left = `${left}px`;
+        selectionBox.style.top = `${top}px`;
+
+        const selectionRect = selectionBox.getBoundingClientRect();
+        document.querySelectorAll('.tab-item').forEach(tabItem => {
+            const tabRect = tabItem.getBoundingClientRect();
+            if (selectionRect.left < tabRect.right && selectionRect.right > tabRect.left &&
+                selectionRect.top < tabRect.bottom && selectionRect.bottom > tabRect.top) {
+                tabItem.classList.add('selected');
+            } else {
+                tabItem.classList.remove('selected');
+            }
+        });
+    });
+
+    document.addEventListener('mouseup', (e) => {
+        if (isSelecting) {
+            isSelecting = false;
+            selectionBox.style.display = 'none';
+
+            const selectedItems = document.querySelectorAll('.tab-item.selected');
+            const closeSelectedBtn = document.getElementById('close-selected-btn');
+            if (selectedItems.length > 0) {
+                closeSelectedBtn.style.display = ''; // Revert to default display (flex item)
+                closeSelectedBtn.textContent = `关闭选中的 ${selectedItems.length} 项`;
+            } else {
+                closeSelectedBtn.style.display = 'none';
+            }
+        }
+    });
+
+    const closeSelectedBtn = document.getElementById('close-selected-btn');
+    if (closeSelectedBtn) {
+        closeSelectedBtn.addEventListener('click', async () => {
+            const selectedItems = document.querySelectorAll('.tab-item.selected');
+            const tabIdsToClose = Array.from(selectedItems).map(item => parseInt(item.dataset.tabId, 10));
+            
+            if (tabIdsToClose.length > 0) {
+                await chrome.tabs.remove(tabIdsToClose);
+                closeSelectedBtn.style.display = 'none';
+            }
+        });
+    }
 
     scheduleInit();
 });

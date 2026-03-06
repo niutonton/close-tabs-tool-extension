@@ -16,6 +16,20 @@ body {
     border-bottom: 1px solid #ddd;
 }
 
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+#marquee-hint {
+    font-size: 12px;
+    color: #888;
+    background-color: #f0f0f0;
+    padding: 3px 8px;
+    border-radius: 12px;
+}
+
 #tab-count {
     font-size: 14px;
     font-weight: 500;
@@ -165,6 +179,16 @@ body {
     flex-shrink: 0;
 }
 
+.pin-btn {
+    opacity: 0.5; /* Make it slightly transparent by default */
+    transition: opacity 0.2s;
+}
+
+.tab-item:hover .pin-btn,
+.tab-item.pinned .pin-btn {
+    opacity: 1; /* Make it fully visible on hover or when pinned */
+}
+
 .pin-btn:hover, .close-btn:hover {
     background-color: #e8eaed;
 }
@@ -259,4 +283,44 @@ body {
     opacity: 0;
     transition: opacity 0.15s ease-out;
     white-space: nowrap;
+}
+
+/* Marquee Selection Styles */
+#selection-box {
+    position: absolute;
+    border: 1px solid #1a73e8;
+    background-color: rgba(26, 115, 232, 0.1);
+    pointer-events: none;
+    display: none;
+    z-index: 2000;
+}
+
+.tab-item.selected {
+    background-color: #e8f0fe;
+    border-left: 3px solid #1a73e8;
+    padding-left: 7px;
+}
+
+/* Custom Drag Preview */
+.drag-preview {
+    position: absolute;
+    left: -9999px; /* Render it off-screen */
+    background-color: white;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+.drag-preview-counter {
+    margin-left: 8px;
+    background-color: #1a73e8;
+    color: white;
+    border-radius: 10px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: bold;
 }

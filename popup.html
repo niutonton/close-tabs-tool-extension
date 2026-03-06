@@ -7,7 +7,10 @@
 </head>
 <body>
     <div id="header">
-        <span id="tab-count"></span>
+        <div class="header-left">
+            <span id="tab-count"></span>
+            <span id="marquee-hint">可通过鼠标批量框选进行操作</span>
+        </div>
         <div class="search-container">
             <input type="text" id="search-box" placeholder="搜索标签页...">
         </div>
@@ -16,10 +19,12 @@
     <div id="tabs-container"></div>
 
     <div id="footer">
+        <button id="close-selected-btn" style="display: none;">关闭选中项</button>
         <button id="add-window-btn" title="新建窗口">&#xFF0B;</button>
         <button id="close-all-btn">关闭所有非固定标签页</button>
     </div>
 
+    <div id="selection-box"></div>
     <div id="custom-tooltip"></div>
     <script src="popup.js"></script>
 </body>
