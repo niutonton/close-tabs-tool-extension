@@ -1,5 +1,13 @@
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('Extension installed or updated.');
+chrome.runtime.onInstalled.addListener((details) => {
+    console.log('Extension installed or updated.');
+    if (details.reason === 'update') {
+        const previousVersion = details.previousVersion;
+        console.log(`Updated from ${previousVersion} to ${chrome.runtime.getManifest().version}`);
+        // Open the update page
+        chrome.tabs.create({
+            url: 'update.html'
+        });
+    }
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

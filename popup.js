@@ -153,6 +153,12 @@ async function renderTabs(groupedTabs, totalTabCount, names, urlCounts) {
         const tabList = document.createElement('div');
         tabList.className = 'tab-list';
 
+        // Add scroll listener to hide floating actions on scroll
+        tabList.addEventListener('scroll', () => {
+             const floatingActions = document.getElementById('floating-actions');
+             if (floatingActions) floatingActions.style.display = 'none';
+        });
+
         for (const tab of tabs) {
             const tabElement = createTabElement(tab, windowId, urlCounts);
             tabList.appendChild(tabElement);
@@ -202,7 +208,6 @@ function createTabElement(tab, windowId, urlCounts) {
             const counter = document.createElement('span');
             counter.className = 'drag-preview-counter';
             counter.textContent = `+${dragIds.length}`;
-            dragPreview.textContent = tab.title; // Show the title of the item being dragged
             dragPreview.appendChild(counter);
 
             document.body.appendChild(dragPreview);
@@ -406,6 +411,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const searchBox = document.getElementById('search-box');
     const closeAllBtn = document.getElementById('close-all-btn');
     const addWindowBtn = document.getElementById('add-window-btn');
+    
+    // Floating Actions
+    const floatingActions = document.getElementById('floating-actions');
+    const floatCloseBtn = document.getElementById('float-close-btn');
+    const floatDragHandle = document.getElementById('float-drag-handle');
 
     searchBox.addEventListener('input', () => {
         scheduleInit();
@@ -427,27 +437,183 @@ document.addEventListener('DOMContentLoaded', async () => {
     addWindowBtn.addEventListener('mouseover', (e) => showTooltip('新建窗口', e));
     addWindowBtn.addEventListener('mouseout', hideTooltip);
 
-    // --- Marquee Selection Logic ---
+    // --- Marquee Selection Logic with Auto-Scroll ---
     const tabsContainer = document.getElementById('tabs-container');
     const selectionBox = document.getElementById('selection-box');
     let isSelecting = false;
     let startX = 0;
     let startY = 0;
+    let initialScrollLeft = 0;
+    let initialScrollTops = new Map();
+    
+    // Auto-scroll variables
+    let autoScrollInterval = null;
+    const baseScrollSpeed = 5; 
+    
+    function stopAutoScroll() {
+        if (autoScrollInterval) {
+            clearInterval(autoScrollInterval);
+            autoScrollInterval = null;
+        }
+    }
+
+    let lastMouseX = 0;
+    let lastMouseY = 0;
+
+    function handleAutoScroll() {
+        if (!isSelecting) {
+            stopAutoScroll();
+            return;
+        }
+
+        const currentX = lastMouseX;
+        const currentY = lastMouseY;
+
+        // 获取整个可视区域的边界，或者是容器的边界
+        // 这里以 body 或 tabsContainer 为准
+        const containerRect = tabsContainer.getBoundingClientRect();
+        
+        // 水平滚动
+        let scrollX = 0;
+        if (currentX > containerRect.right) {
+            const distance = currentX - containerRect.right;
+            scrollX = baseScrollSpeed + distance * 0.2;
+        } else if (currentX < containerRect.left) {
+            const distance = containerRect.left - currentX;
+            scrollX = -(baseScrollSpeed + distance * 0.2);
+        }
+
+        // 垂直滚动
+        let scrollY = 0;
+        let targetList = null;
+
+        const allLists = document.querySelectorAll('.tab-list');
+        let minDistX = Infinity;
+        
+        allLists.forEach(list => {
+            const rect = list.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const dist = Math.abs(currentX - centerX);
+            if (dist < minDistX) {
+                minDistX = dist;
+                targetList = list;
+            }
+        });
+
+        if (targetList) {
+            const listRect = targetList.getBoundingClientRect();
+            if (currentY > listRect.bottom) {
+                const distance = currentY - listRect.bottom;
+                scrollY = baseScrollSpeed + distance * 0.2;
+            } else if (currentY < listRect.top) {
+                const distance = listRect.top - currentY;
+                scrollY = -(baseScrollSpeed + distance * 0.2);
+            }
+        }
+
+        if (scrollX !== 0 || scrollY !== 0) {
+            if (!autoScrollInterval) {
+                autoScrollInterval = setInterval(() => {
+                    let scrolled = false;
+                    if (scrollX !== 0) {
+                        tabsContainer.scrollBy({ left: scrollX, behavior: 'auto' });
+                        scrolled = true;
+                    }
+                    if (scrollY !== 0 && targetList) {
+                        targetList.scrollBy({ top: scrollY, behavior: 'auto' });
+                        scrolled = true;
+                    }
+                    // 滚动后，更新选择框的位置和选中状态
+                    if (scrolled) {
+                        updateSelection(lastMouseX, lastMouseY);
+                    }
+                }, 16);
+            }
+        } else {
+            stopAutoScroll();
+        }
+    }
+
+    function updateSelection(currentX, currentY) {
+        lastMouseX = currentX;
+        lastMouseY = currentY;
+        
+        let effectiveStartX = startX - (tabsContainer.scrollLeft - initialScrollLeft);
+        
+        // 为了让视觉上的蓝色框选框表现自然，我们让它吸附到鼠标当前所在的列表中
+        let targetList = null;
+        let minDistX = Infinity;
+        document.querySelectorAll('.tab-list').forEach(list => {
+            const rect = list.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const dist = Math.abs(currentX - centerX);
+            if (dist < minDistX) {
+                minDistX = dist;
+                targetList = list;
+            }
+        });
+
+        let visualEffectiveStartY = startY;
+        if (targetList && initialScrollTops.has(targetList)) {
+            visualEffectiveStartY = startY - (targetList.scrollTop - initialScrollTops.get(targetList));
+        }
+
+        const width = Math.abs(currentX - effectiveStartX);
+        const height = Math.abs(currentY - visualEffectiveStartY);
+        const left = Math.min(currentX, effectiveStartX);
+        const top = Math.min(currentY, visualEffectiveStartY);
+
+        selectionBox.style.width = `${width}px`;
+        selectionBox.style.height = `${height}px`;
+        selectionBox.style.left = `${left}px`;
+        selectionBox.style.top = `${top}px`;
+
+        // 现在针对每个独立的标签页计算真实的碰撞检测
+        // 因为每个列表的滚动状态可能不同，我们必须让选中逻辑基于标签页所在列表的滚动偏移来单独计算
+        const itemSelectionLeft = Math.min(currentX, effectiveStartX);
+        const itemSelectionRight = Math.max(currentX, effectiveStartX);
+
+        document.querySelectorAll('.tab-item').forEach(tabItem => {
+            const list = tabItem.closest('.tab-list');
+            const scrollDelta = list && initialScrollTops.has(list) ? list.scrollTop - initialScrollTops.get(list) : 0;
+            
+            // 这个标签页对应的逻辑起始Y坐标
+            const itemEffectiveStartY = startY - scrollDelta;
+            const itemSelectionTop = Math.min(currentY, itemEffectiveStartY);
+            const itemSelectionBottom = Math.max(currentY, itemEffectiveStartY);
+            
+            const tabRect = tabItem.getBoundingClientRect();
+            
+            // 加上一些容差，防止边界因为小数问题判定失败
+            if (itemSelectionLeft < tabRect.right - 5 &&
+                itemSelectionRight > tabRect.left + 5 &&
+                itemSelectionTop < tabRect.bottom - 5 &&
+                itemSelectionBottom > tabRect.top + 5) {
+                tabItem.classList.add('selected');
+            } else {
+                tabItem.classList.remove('selected');
+            }
+        });
+    }
 
     tabsContainer.addEventListener('mousedown', (e) => {
         if (e.target === tabsContainer || e.target.classList.contains('window-container') || e.target.classList.contains('tab-list')) {
-            // Clear any previous selection when starting a new one from a blank area
             document.querySelectorAll('.tab-item.selected').forEach(item => {
                 item.classList.remove('selected');
             });
-            const closeSelectedBtn = document.getElementById('close-selected-btn');
-            if (closeSelectedBtn) {
-                closeSelectedBtn.style.display = 'none';
-            }
+            floatingActions.style.display = 'none';
 
             isSelecting = true;
             startX = e.clientX;
             startY = e.clientY;
+            
+            // 记录初始的滚动位置
+            initialScrollLeft = tabsContainer.scrollLeft;
+            initialScrollTops.clear();
+            document.querySelectorAll('.tab-list').forEach(list => {
+                initialScrollTops.set(list, list.scrollTop);
+            });
+
             selectionBox.style.left = `${startX}px`;
             selectionBox.style.top = `${startY}px`;
             selectionBox.style.width = '0px';
@@ -459,58 +625,89 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.addEventListener('mousemove', (e) => {
         if (!isSelecting) return;
-        const currentX = e.clientX;
-        const currentY = e.clientY;
-        const width = Math.abs(currentX - startX);
-        const height = Math.abs(currentY - startY);
-        const left = Math.min(currentX, startX);
-        const top = Math.min(currentY, startY);
-
-        selectionBox.style.width = `${width}px`;
-        selectionBox.style.height = `${height}px`;
-        selectionBox.style.left = `${left}px`;
-        selectionBox.style.top = `${top}px`;
-
-        const selectionRect = selectionBox.getBoundingClientRect();
-        document.querySelectorAll('.tab-item').forEach(tabItem => {
-            const tabRect = tabItem.getBoundingClientRect();
-            if (selectionRect.left < tabRect.right && selectionRect.right > tabRect.left &&
-                selectionRect.top < tabRect.bottom && selectionRect.bottom > tabRect.top) {
-                tabItem.classList.add('selected');
-            } else {
-                tabItem.classList.remove('selected');
-            }
-        });
+        
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        
+        updateSelection(lastMouseX, lastMouseY);
+        handleAutoScroll();
     });
 
     document.addEventListener('mouseup', (e) => {
         if (isSelecting) {
             isSelecting = false;
+            stopAutoScroll();
             selectionBox.style.display = 'none';
 
             const selectedItems = document.querySelectorAll('.tab-item.selected');
-            const closeSelectedBtn = document.getElementById('close-selected-btn');
             if (selectedItems.length > 0) {
-                closeSelectedBtn.style.display = ''; // Revert to default display (flex item)
-                closeSelectedBtn.textContent = `关闭选中的 ${selectedItems.length} 项`;
+                // Calculate position for floating actions
+                let minTop = Infinity;
+                let minLeft = Infinity;
+                let maxRight = -Infinity;
+
+                selectedItems.forEach(item => {
+                    const rect = item.getBoundingClientRect();
+                    if (rect.top < minTop) minTop = rect.top;
+                    if (rect.left < minLeft) minLeft = rect.left;
+                    if (rect.right > maxRight) maxRight = rect.right;
+                });
+
+                // Position logic
+                const centerX = minLeft + (maxRight - minLeft) / 2;
+                let left = centerX - 70; 
+                let top = minTop - 50; 
+
+                // Boundary checks
+                if (top < 10) top = minTop + 10; 
+                if (left < 10) left = 10;
+                if (left > 600) left = 600;
+
+                floatingActions.style.left = `${left}px`;
+                floatingActions.style.top = `${top}px`;
+                floatingActions.style.display = 'flex';
             } else {
-                closeSelectedBtn.style.display = 'none';
+                floatingActions.style.display = 'none';
             }
         }
     });
 
-    const closeSelectedBtn = document.getElementById('close-selected-btn');
-    if (closeSelectedBtn) {
-        closeSelectedBtn.addEventListener('click', async () => {
-            const selectedItems = document.querySelectorAll('.tab-item.selected');
-            const tabIdsToClose = Array.from(selectedItems).map(item => parseInt(item.dataset.tabId, 10));
-            
-            if (tabIdsToClose.length > 0) {
-                await chrome.tabs.remove(tabIdsToClose);
-                closeSelectedBtn.style.display = 'none';
-            }
+    // Float Actions Logic
+    floatCloseBtn.addEventListener('click', async () => {
+        const selectedItems = document.querySelectorAll('.tab-item.selected');
+        const tabIds = Array.from(selectedItems).map(i => parseInt(i.dataset.tabId));
+        if (tabIds.length > 0) {
+            await chrome.tabs.remove(tabIds);
+            floatingActions.style.display = 'none';
+        }
+    });
+
+    floatDragHandle.addEventListener('dragstart', (e) => {
+        const selectedItems = document.querySelectorAll('.tab-item.selected');
+        const dragIds = Array.from(selectedItems).map(item => item.dataset.tabId);
+        
+        e.dataTransfer.setData('text/plain', dragIds.join(','));
+        e.dataTransfer.effectAllowed = 'move';
+
+        const dragPreview = document.createElement('div');
+        dragPreview.className = 'drag-preview';
+        dragPreview.textContent = `移动 ${dragIds.length} 个标签页`;
+        const counter = document.createElement('span');
+        counter.className = 'drag-preview-counter';
+        counter.textContent = `+${dragIds.length}`;
+        dragPreview.appendChild(counter);
+
+        document.body.appendChild(dragPreview);
+        e.dataTransfer.setDragImage(dragPreview, -10, -10);
+
+        setTimeout(() => document.body.removeChild(dragPreview), 0);
+    });
+
+    floatDragHandle.addEventListener('dragend', () => {
+         document.querySelectorAll('.drag-over-top, .drag-over-bottom, .drag-over-forbidden').forEach(el => {
+            el.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-forbidden');
         });
-    }
+    });
 
     scheduleInit();
 });

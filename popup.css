@@ -54,8 +54,8 @@ body {
     display: flex;
     overflow-x: auto;
     height: 400px;
-    padding: 10px;
-    gap: 10px;
+    padding: 10px 10px 10px 20px; /* Increased left padding to 20px */
+    gap: 20px; /* Increased gap for better drag handling */
     background-color: #f8f9fa; /* A very light grey background for the scroll area */
 }
 
@@ -193,11 +193,6 @@ body {
     background-color: #e8eaed;
 }
 
-.close-btn {
-    font-size: 18px;
-    color: #5f6368;
-}
-
 .duplicate-badge {
     background-color: #e74c3c;
     color: white;
@@ -236,8 +231,96 @@ body {
     background-color: #feebee; /* A light red to indicate a forbidden drop zone */
 }
 
-.tab-item.drag-over-forbidden {
-    background-color: #feebee; /* A light red to indicate a forbidden drop zone */
+.tab-item.selected {
+    background-color: #e8f0fe;
+    border-left: 3px solid #1a73e8;
+    padding-left: 7px;
+}
+
+/* Custom Drag Preview */
+.drag-preview {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: -1;
+    background-color: white;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+.drag-preview-counter {
+    margin-left: 8px;
+    background-color: #1a73e8;
+    color: white;
+    border-radius: 10px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+/* Marquee Selection Styles */
+#selection-box {
+    position: absolute;
+    border: 1px solid #1a73e8;
+    background-color: rgba(26, 115, 232, 0.1);
+    pointer-events: none;
+    display: none;
+    z-index: 2000;
+}
+
+/* Floating Action Bar */
+.floating-actions {
+    position: absolute;
+    display: none; /* Initially hidden */
+    flex-direction: row;
+    gap: 8px;
+    background-color: white;
+    padding: 8px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 3000;
+    pointer-events: auto;
+    border: 1px solid #e0e0e0;
+}
+
+.float-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.float-btn.close {
+    background-color: #d93025;
+    color: white;
+}
+
+.float-btn.close:hover {
+    background-color: #b31412;
+}
+
+.float-btn.drag {
+    background-color: #1a73e8;
+    color: white;
+    cursor: grab;
+}
+
+.float-btn.drag:hover {
+    background-color: #1558b0;
+}
+
+.float-btn.drag:active {
+    cursor: grabbing;
 }
 
 
@@ -283,44 +366,4 @@ body {
     opacity: 0;
     transition: opacity 0.15s ease-out;
     white-space: nowrap;
-}
-
-/* Marquee Selection Styles */
-#selection-box {
-    position: absolute;
-    border: 1px solid #1a73e8;
-    background-color: rgba(26, 115, 232, 0.1);
-    pointer-events: none;
-    display: none;
-    z-index: 2000;
-}
-
-.tab-item.selected {
-    background-color: #e8f0fe;
-    border-left: 3px solid #1a73e8;
-    padding-left: 7px;
-}
-
-/* Custom Drag Preview */
-.drag-preview {
-    position: absolute;
-    left: -9999px; /* Render it off-screen */
-    background-color: white;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    padding: 5px 10px;
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-}
-
-.drag-preview-counter {
-    margin-left: 8px;
-    background-color: #1a73e8;
-    color: white;
-    border-radius: 10px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: bold;
 }
